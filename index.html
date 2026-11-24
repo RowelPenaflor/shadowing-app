@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadowing Practice</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #f4f5f7;
+      color: #1d1f23;
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.5rem; margin: 8px 0 16px; }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+    label { display: block; font-size: 0.9rem; font-weight: 600; margin-bottom: 6px; }
+    input, select, textarea, button { font: inherit; }
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #cfd3da;
+      border-radius: 8px;
+      margin-top: 4px;
+      background: #fff;
+    }
+    input:disabled { background: #f0f1f3; color: #9aa0a8; }
+    textarea { resize: vertical; margin-bottom: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row select { flex: 1; min-width: 140px; margin-top: 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid .full { grid-column: 1 / -1; }
+    input[type="range"] { width: 100%; margin-top: 10px; }
+    button {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #e5e7eb; color: #1d1f23; }
+    .controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .controls button { padding: 14px 6px; font-size: 1rem; }
+    #status { font-weight: 600; min-height: 1.4em; margin: 4px 2px 12px; }
+    #sentences { padding-left: 24px; line-height: 1.5; }
+    #sentences li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+    #sentences li.active { background: #fff3c4; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Shadowing Practice</h1>
+
+    <section class="card">
+      <label for="title">Title</label>
+      <input id="title" type="text" placeholder="e.g., Briefing practice">
+      <label for="text" style="margin-top:10px;">Article</label>
+      <textarea id="text" rows="8" placeholder="Paste your article here..."></textarea>
+      <div class="row">
+        <button id="saveBtn">Save</button>
+        <select id="savedList"></select>
+        <button id="deleteBtn" class="secondary">Delete</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <label>Split by
+          <select id="splitMode">
+            <option value="chunk" selected>Chunk (phrases)</option>
+            <option value="sentence">Sentence</option>
+          </select>
+        </label>
+        <label>Repeats
+          <input id="repeats" type="number" min="1" max="50" value="3">
+        </label>
+        <label>Min words per chunk
+          <input id="minWords" type="number" min="2" max="20" value="5">
+        </label>
+        <label>Max words per chunk
+          <input id="maxWords" type="number" min="2" max="20" value="7">
+        </label>
+        <label>Extra pause (sec)
+          <input id="extraPause" type="number" min="0" max="20" step="0.5" value="1">
+        </label>
+        <label>Speed: <span id="rateValue">0.9</span>
+          <input id="rate" type="range" min="0.5" max="1.5" step="0.05" value="0.9">
+        </label>
+        <label class="full">Voice
+          <select id="voice"></select>
+        </label>
+      </div>
+    </section>
+
+    <section class="card controls">
+      <button id="prevBtn" class="secondary">⏮ Back</button>
+      <button id="playBtn">▶ Start</button>
+      <button id="nextBtn" class="secondary">Next ⏭</button>
+      <button id="stopBtn" class="secondary">■ Stop</button>
+    </section>
+
+    <p id="status">Ready.</p>
+    <ol id="sentences"></ol>
+  </main>
+
+  <script>
+    // Element references
+    const $ = (id) => document.getElementById(id);
+    const els = {
+      title: $('title'),
+      text: $('text'),
+      saveBtn: $('saveBtn'),
+      savedList: $('savedList'),
+      deleteBtn: $('deleteBtn'),
+      splitMode: $('splitMode'),
+      minWords: $('minWords'),
+      maxWords: $('maxWords'),
+      repeats: $('repeats'),
+      extraPause: $('extraPause'),
+      rate: $('rate'),
+      rateValue: $('rateValue'),
+      voice: $('voice'),
+      prevBtn: $('prevBtn'),
+      playBtn: $('playBtn'),
+      nextBtn: $('nextBtn'),
+      stopBtn: $('stopBtn'),
+      status: $('status'),
+      list: $('sentences')
+    };
+
+    const STORAGE_KEYS = {
+      articles: 'shadowing.articles',
+      settings: 'shadowing.settings'
+    };
+
+    // Words that usually start a new thought group; chunks prefer to split before them
+    const BREAK_WORDS = new Set([
+      'and', 'but', 'or', 'so', 'because', 'although', 'though', 'while', 'when',
+      'whenever', 'where', 'if', 'unless', 'until', 'since', 'after', 'before',
+      'that', 'which', 'who', 'whom', 'whose', 'to', 'in', 'on', 'at', 'for',
+      'with', 'without', 'from', 'about', 'into', 'during', 'through', 'by', 'of',
+      'rather', 'than', 'however', 'whether'
+    ]);
+
+    // App state; runId invalidates any playback loop that is no longer current
+    const state = {
+      pieces: [],
+      index: 0,
+      playing: false,
+      runId: 0,
+      wakeLock: null,
+      currentUtterance: null
+    };
+
+    let voices = [];
+
+    // ---------- Storage ----------
+    function loadJSON(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function saveJSON(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch {
+        setStatus('Could not save on this device.');
+      }
+    }
+
+    function getSettings() {
+      return loadJSON(STORAGE_KEYS.settings, {});
+    }
+
+    function saveSettings(extra = {}) {
+      const settings = {
+        ...getSettings(),
+        splitMode: els.splitMode.value,
+        minWords: els.minWords.value,
+        maxWords: els.maxWords.value,
+        repeats: els.repeats.value,
+        extraPause: els.extraPause.value,
+        rate: els.rate.value,
+        voice: els.voice.value,
+        ...extra
+      };
+      saveJSON(STORAGE_KEYS.settings, settings);
+    }
+
+    function applySettings() {
+      const s = getSettings();
+      if (s.splitMode) els.splitMode.value = s.splitMode;
+      if (s.minWords) els.minWords.value = s.minWords;
+      if (s.maxWords) els.maxWords.value = s.maxWords;
+      if (s.repeats) els.repeats.value = s.repeats;
+      if (s.extraPause) els.extraPause.value = s.extraPause;
+      if (s.rate) els.rate.value = s.rate;
+      els.rateValue.textContent = els.rate.value;
+      updateChunkInputsState();
+    }
+
+    function updateChunkInputsState() {
+      const isChunk = els.splitMode.value === 'chunk';
+      els.minWords.disabled = !isChunk;
+      els.maxWords.disabled = !isChunk;
+    }
+
+    function getChunkLimits() {
+      let minW = clampInt(els.minWords.value, 2, 20);
+      let maxW = clampInt(els.maxWords.value, 2, 20);
+      if (minW > maxW) minW = maxW;
+      return { minW, maxW };
+    }
+
+    // ---------- Saved articles ----------
+    function getArticles() {
+      return loadJSON(STORAGE_KEYS.articles, []);
+    }
+
+    function setArticles(articles) {
+      saveJSON(STORAGE_KEYS.articles, articles);
+    }
+
+    function refreshSavedList(selectedId = '') {
+      els.savedList.innerHTML = '<option value="">Saved articles…</option>';
+      getArticles().forEach((a) => {
+        const option = document.createElement('option');
+        option.value = a.id;
+        option.textContent = a.title;
+        els.savedList.appendChild(option);
+      });
+      els.savedList.value = selectedId;
+    }
+
+    function saveArticle() {
+      const text = els.text.value.trim();
+      if (!text) {
+        setStatus('Paste an article before saving.');
+        return;
+      }
+      const title = els.title.value.trim() || text.slice(0, 40) + '…';
+      const articles = getArticles();
+      let article = articles.find((a) => a.id === els.savedList.value) ||
+                    articles.find((a) => a.title === title);
+
+      if (article) {
+        article.title = title;
+        article.text = text;
+      } else {
+        article = { id: Date.now().toString(), title, text, index: 0 };
+        articles.push(article);
+      }
+      setArticles(articles);
+      refreshSavedList(article.id);
+      saveSettings({ lastArticleId: article.id });
+      setStatus(`Saved "${title}".`);
+    }
+
+    function openArticle(id) {
+      const article = getArticles().find((a) => a.id === id);
+      if (!article) return;
+      stop(false);
+      els.title.value = article.title;
+      els.text.value = article.text;
+      state.index = article.index || 0;
+      buildPieces();
+      saveSettings({ lastArticleId: id });
+      setStatus(`Opened "${article.title}" at part ${state.index + 1}.`);
+    }
+
+    function deleteArticle() {
+      const id = els.savedList.value;
+      if (!id) {
+        setStatus('Choose a saved article to delete.');
+        return;
+      }
+      const article = getArticles().find((a) => a.id === id);
+      if (!confirm(`Delete "${article.title}"?`)) return;
+      setArticles(getArticles().filter((a) => a.id !== id));
+      refreshSavedList();
+      setStatus('Article deleted.');
+    }
+
+    function saveProgress() {
+      const id = els.savedList.value;
+      if (!id) return;
+      const articles = getArticles();
+      const article = articles.find((a) => a.id === id);
+      if (article) {
+        article.index = state.index;
+        setArticles(articles);
+      }
+    }
+
+    // ---------- Text splitting ----------
+    function splitSentences(text) {
+      const clean = text.replace(/\s+/g, ' ').trim();
+      if (!clean) return [];
+      if ('Segmenter' in Intl) {
+        const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
+        return Array.from(segmenter.segment(clean), (s) => s.segment.trim()).filter(Boolean);
+      }
+      const matches = clean.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [];
+      return matches.map((s) => s.trim()).filter(Boolean);
+    }
+
+    function normalizeWord(word) {
+      return word.toLowerCase().replace(/[^a-z']/g, '');
+    }
+
+    // Splits one sentence into chunks of minW–maxW words.
+    // Cut priority inside the window: after , ; :  →  before a break word  →  at the max.
+    function chunkSentence(sentence, minW, maxW) {
+      const words = sentence.split(/\s+/).filter(Boolean);
+      const chunks = [];
+      let start = 0;
+
+      while (start < words.length) {
+        const remaining = words.length - start;
+        if (remaining <= maxW) {
+          chunks.push(words.slice(start).join(' '));
+          break;
+        }
+
+        // cut = index of the first word of the next chunk
+        const lo = start + minW;
+        const hi = Math.min(start + maxW, words.length - minW);
+        let cut = -1;
+
+        if (hi >= lo) {
+          for (let i = hi; i >= lo; i--) {
+            if (/[,;:]["')\]]*$/.test(words[i - 1])) { cut = i; break; }
+          }
+          if (cut === -1) {
+            for (let i = hi; i >= lo; i--) {
+              if (BREAK_WORDS.has(normalizeWord(words[i]))) { cut = i; break; }
+            }
+          }
+          if (cut === -1) cut = hi;
+        } else {
+          // Too long for one chunk but too short for two full chunks: split near the middle
+          cut = start + Math.ceil(remaining / 2);
+        }
+
+        chunks.push(words.slice(start, cut).join(' '));
+        start = cut;
+      }
+      return chunks;
+    }
+
+    function buildPieces() {
+      const sentences = splitSentences(els.text.value);
+      if (els.splitMode.value === 'chunk') {
+        const { minW, maxW } = getChunkLimits();
+        state.pieces = sentences.flatMap((s) => chunkSentence(s, minW, maxW));
+      } else {
+        state.pieces = sentences;
+      }
+      state.index = Math.min(state.index, Math.max(state.pieces.length - 1, 0));
+      renderPieces();
+    }
+
+    function renderPieces() {
+      els.list.innerHTML = '';
+      state.pieces.forEach((piece, i) => {
+        const li = document.createElement('li');
+        li.textContent = piece;
+        li.addEventListener('click', () => jumpTo(i));
+        els.list.appendChild(li);
+      });
+      highlight();
+    }
+
+    function highlight() {
+      Array.from(els.list.children).forEach((li, i) => {
+        li.classList.toggle('active', i === state.index);
+      });
+      const active = els.list.children[state.index];
+      if (active && state.playing) {
+        active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+
+    // ---------- Speech ----------
+    function loadVoices() {
+      voices = speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith('en'));
+      const savedVoice = getSettings().voice;
+      els.voice.innerHTML = '';
+      voices.forEach((v) => {
+        const option = document.createElement('option');
+        option.value = v.name;
+        option.textContent = `${v.name} (${v.lang})`;
+        els.voice.appendChild(option);
+      });
+      if (savedVoice && voices.some((v) => v.name === savedVoice)) {
+        els.voice.value = savedVoice;
+      }
+    }
+
+    function speak(text) {
+      return new Promise((resolve) => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        const voice = voices.find((v) => v.name === els.voice.value);
+        if (voice) {
+          utterance.voice = voice;
+          utterance.lang = voice.lang;
+        } else {
+          utterance.lang = 'en-US';
+        }
+        utterance.rate = Number(els.rate.value);
+        utterance.onend = resolve;
+        utterance.onerror = resolve;
+        state.currentUtterance = utterance; // keeps a reference so onend fires reliably
+        speechSynthesis.speak(utterance);
+      });
+    }
+
+    function wait(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function clampInt(value, min, max) {
+      const n = parseInt(value, 10);
+      if (Number.isNaN(n)) return min;
+      return Math.min(Math.max(n, min), max);
+    }
+
+    // ---------- Screen wake lock ----------
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator && !state.wakeLock) {
+          state.wakeLock = await navigator.wakeLock.request('screen');
+          state.wakeLock.addEventListener('release', () => { state.wakeLock = null; });
+        }
+      } catch {
+        // Wake lock unsupported or denied; playback continues without it
+      }
+    }
+
+    function releaseWakeLock() {
+      if (state.wakeLock) {
+        state.wakeLock.release().catch(() => {});
+        state.wakeLock = null;
+      }
+    }
+
+    // ---------- Playback ----------
+    async function play() {
+      if (!state.pieces.length) buildPieces();
+      if (!state.pieces.length) {
+        setStatus('Paste an article first.');
+        return;
+      }
+
+      const runId = ++state.runId;
+      state.playing = true;
+      updatePlayButton();
+      requestWakeLock();
+
+      while (runId === state.runId && state.index < state.pieces.length) {
+        const repeats = clampInt(els.repeats.value, 1, 50);
+        const extraMs = Math.max(Number(els.extraPause.value) || 0, 0) * 1000;
+        highlight();
+
+        for (let r = 1; r <= repeats; r++) {
+          if (runId !== state.runId) return;
+          setStatus(`Part ${state.index + 1} of ${state.pieces.length} — listen (${r}/${repeats})`);
+          const started = performance.now();
+          await speak(state.pieces[state.index]);
+          if (runId !== state.runId) return;
+
+          // Pause matches the spoken length plus extra time for the learner to repeat
+          const spokenMs = performance.now() - started;
+          setStatus(`Part ${state.index + 1} of ${state.pieces.length} — your turn (${r}/${repeats})`);
+          await wait(spokenMs + extraMs);
+        }
+
+        if (runId !== state.runId) return;
+        state.index++;
+        saveProgress();
+      }
+
+      if (runId === state.runId) {
+        state.playing = false;
+        state.index = 0;
+        saveProgress();
+        updatePlayButton();
+        highlight();
+        releaseWakeLock();
+        setStatus('Finished. Great work!');
+      }
+    }
+
+    function pause() {
+      state.runId++;
+      state.playing = false;
+      speechSynthesis.cancel();
+      updatePlayButton();
+      releaseWakeLock();
+      setStatus(`Paused at part ${state.index + 1}.`);
+    }
+
+    function stop(showStatus = true) {
+      state.runId++;
+      state.playing = false;
+      speechSynthesis.cancel();
+      state.index = 0;
+      saveProgress();
+      updatePlayButton();
+      highlight();
+      releaseWakeLock();
+      if (showStatus) setStatus('Stopped.');
+    }
+
+    function jumpTo(i) {
+      if (!state.pieces.length) return;
+      state.index = Math.min(Math.max(i, 0), state.pieces.length - 1);
+      saveProgress();
+      highlight();
+      if (state.playing) {
+        speechSynthesis.cancel();
+        play();
+      } else {
+        setStatus(`Ready at part ${state.index + 1}.`);
+      }
+    }
+
+    function updatePlayButton() {
+      els.playBtn.textContent = state.playing ? '⏸ Pause' : '▶ Start';
+    }
+
+    function setStatus(message) {
+      els.status.textContent = message;
+    }
+
+    function rebuildFromSettings() {
+      if (state.playing) stop(false);
+      state.index = 0;
+      buildPieces();
+      saveSettings();
+    }
+
+    // ---------- Events ----------
+    els.playBtn.addEventListener('click', () => (state.playing ? pause() : play()));
+    els.stopBtn.addEventListener('click', () => stop());
+    els.nextBtn.addEventListener('click', () => jumpTo(state.index + 1));
+    els.prevBtn.addEventListener('click', () => jumpTo(state.index - 1));
+
+    els.text.addEventListener('input', () => {
+      if (state.playing) stop(false);
+      state.index = 0;
+      buildPieces();
+    });
+
+    els.splitMode.addEventListener('change', () => {
+      updateChunkInputsState();
+      rebuildFromSettings();
+    });
+    els.minWords.addEventListener('change', rebuildFromSettings);
+    els.maxWords.addEventListener('change', rebuildFromSettings);
+
+    els.rate.addEventListener('input', () => {
+      els.rateValue.textContent = els.rate.value;
+      saveSettings();
+    });
+
+    [els.repeats, els.extraPause, els.voice].forEach((el) => {
+      el.addEventListener('change', () => saveSettings());
+    });
+
+    els.saveBtn.addEventListener('click', saveArticle);
+    els.deleteBtn.addEventListener('click', deleteArticle);
+    els.savedList.addEventListener('change', () => {
+      if (els.savedList.value) openArticle(els.savedList.value);
+    });
+
+    // ---------- Startup ----------
+    function init() {
+      if (!('speechSynthesis' in window)) {
+        setStatus('This browser does not support speech. Try Chrome, Edge, or Safari.');
+        els.playBtn.disabled = true;
+        return;
+      }
+      applySettings();
+      loadVoices();
+      speechSynthesis.addEventListener('voiceschanged', loadVoices);
+
+      const lastId = getSettings().lastArticleId;
+      refreshSavedList();
+      if (lastId && getArticles().some((a) => a.id === lastId)) {
+        els.savedList.value = lastId;
+        openArticle(lastId);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
